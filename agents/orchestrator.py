@@ -26,6 +26,7 @@ def orchestrator(
     state        = None,
     level        = None,
     county       = None,
+    city         = None,
     n_results    = 20,
     generate_pdf = False,
     school_name  = None,
@@ -34,8 +35,8 @@ def orchestrator(
     print("\n" + "=" * 55)
     print("🎯 ORCHESTRATOR ACTIVATED")
     print(f"   Query  : {query}")
-    print(f"   State  : {state}  |  Level : {level}")
-    print(f"   County : {county}")
+    print(f"   State  : {state} | Level: {level}")
+    print(f"   County : {county} | City: {city}")
     print("=" * 55)
 
     response = {
@@ -48,38 +49,37 @@ def orchestrator(
         "pdf_result":      None,
         "query":           query,
         "filters_used":    {
-            "state": state, "level": level, "county": county
+            "state": state, "level": level,
+            "county": county, "city": city
         },
         "agents_called":   [],
         "has_local_data":  False,
         "from_cache":      False
     }
 
+    # Build ChromaDB filters
     filters = {}
-    if state:
-        filters["state"] = state
-    if level:
-        filters["level"] = level
+    if state:  filters["state"] = state
+    if level:  filters["level"] = level
     if county and county not in ["All Counties", "Select County"]:
         filters["county"] = county
 
-    # ── Check local CSV data ───────────────────────
+    # Check local CSV data
     local_data_exists = False
     if df is not None and state and level:
         local_data_exists = has_local_data(df, state, level)
     response["has_local_data"] = local_data_exists
 
-    # ── Check ChromaDB cache ───────────────────────
+    # Check ChromaDB cache
     cache_hit = False
     if not local_data_exists and state and level:
         cache_hit = is_cached(collection, state, level)
         if cache_hit:
-            print(f"\n⚡ Cache HIT for {level} in {state}. Using ChromaDB...")
+            print(f"\n⚡ Cache HIT for {level} in {state}.")
             response["from_cache"] = True
 
     # ══════════════════════════════════════════════
-    # STEP 1 — Librarian Agent
-    # Runs for: local CSV data OR cache hit
+    # STEP 1 — Librarian Agent (local CSV or cache)
     # ══════════════════════════════════════════════
     if local_data_exists or cache_hit:
         source_label = "local CSV" if local_data_exists else "cache"
@@ -100,47 +100,40 @@ def orchestrator(
         print(f"\n   ℹ️ No local/cached data for {level} in {state}.")
 
     # ══════════════════════════════════════════════
-    # STEP 2 — Government API Fetch
-    # Only when no local data AND no cache hit
+    # STEP 2 — Government API / NCES Search
     # ══════════════════════════════════════════════
     api_schools = []
 
     if not local_data_exists and not cache_hit and state and level:
-
         if level in UNI_LEVELS:
-            print(f"\n📋 Step 2: College Scorecard API ({level})...")
+            print(f"\n📋 Step 2: College Scorecard API...")
             api_schools = fetch_universities(
                 state=state, level=level, per_page=20
             )
             response["agents_called"].append("CollegeScorecard")
 
         elif level in K12_LEVELS:
-            print(f"\n📋 Step 2: Tavily K-12 Search ({level})...")
+            print(f"\n📋 Step 2: NCES K-12 Search...")
             api_schools = fetch_k12_schools(
-                state=state, level=level,
-                county=county, limit=20
+                state  = state,
+                level  = level,
+                county = county,
+                city   = city,
+                limit  = 20
             )
             response["agents_called"].append("NCES_API")
 
-        # ── Cache results in ChromaDB ──────────────
+        # Cache results in ChromaDB
         if api_schools:
             print(f"   💾 Caching {len(api_schools)} schools...")
-            cache_api_schools(
-                collection,
-                api_schools,
-                source="api"
-            )
-            response["source"]     = "api"
-            response["api_schools"]= api_schools
+            cache_api_schools(collection, api_schools, source="api")
+            response["source"]      = "api"
+            response["api_schools"] = api_schools
         else:
             print("   ⚠️ API returned nothing. Falling back to web.")
 
     # ══════════════════════════════════════════════
     # STEP 3 — Researcher Agent (web search)
-    # Triggered when:
-    #   a) API returned nothing
-    #   b) Specific school name in query
-    #   c) Auto-generated query
     # ══════════════════════════════════════════════
     specific_keywords = [
         "ut austin", "harvard", "stanford", "mit",
@@ -159,19 +152,17 @@ def orchestrator(
     needs_web = (
         (not local_data_exists and
          not cache_hit and
-         not api_schools)      or
-        is_specific_school     or
+         not api_schools)     or
+        is_specific_school    or
         is_auto_query
     )
 
     if needs_web:
-        if is_specific_school:
-            reason = "specific school detected"
-        elif not api_schools:
-            reason = "API returned no results"
-        else:
-            reason = "auto-triggered query"
-
+        reason = (
+            "specific school"  if is_specific_school else
+            "auto query"       if is_auto_query else
+            "no API results"
+        )
         print(f"\n📋 Step 3: Researcher Agent ({reason})...")
         researcher_result = researcher_agent(
             query     = query,
@@ -210,11 +201,10 @@ def orchestrator(
 
     print("\n" + "=" * 55)
     print("✅ ORCHESTRATOR COMPLETE")
-    print(f"   Agents  : {', '.join(response['agents_called'])}")
-    print(f"   Source  : {response['source']}")
-    print(f"   Cache   : {'HIT ⚡' if cache_hit else 'MISS'}")
-    print(f"   Local   : {len(response['schools'])}")
-    print(f"   API     : {len(response['api_schools'])}")
+    print(f"   Agents : {', '.join(response['agents_called'])}")
+    print(f"   Source : {response['source']}")
+    print(f"   Local  : {len(response['schools'])}")
+    print(f"   API    : {len(response['api_schools'])}")
     print("=" * 55)
 
     return response

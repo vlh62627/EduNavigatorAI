@@ -13,15 +13,16 @@ from utils.geo_filter import (
     get_education_levels,
     is_county_applicable,
     get_counties_for_level,
+    get_cities_for_county,
     filter_schools,
     get_filter_summary,
     has_local_data
 )
 from utils.embeddings    import load_vector_db
 from agents.orchestrator import orchestrator
+from utils.startup       import ensure_data_files
 
 load_dotenv()
-from utils.startup import ensure_data_files
 
 # ── Page Configuration ─────────────────────────────
 st.set_page_config(
@@ -40,7 +41,6 @@ st.markdown("""
         font-family: 'DM Sans', sans-serif;
     }
 
-    /* ── Header ─────────────────────────────── */
     .main-header {
         background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 50%, #1e5f8e 100%);
         padding: 1.2rem 2rem;
@@ -72,8 +72,7 @@ st.markdown("""
         text-shadow: 0 2px 8px rgba(0,0,0,0.3);
     }
     .main-header .gold-line {
-        width: 40px;
-        height: 2px;
+        width: 40px; height: 2px;
         background: linear-gradient(90deg, #d4af37, #f5d060);
         margin: 0.4rem auto;
         border-radius: 2px;
@@ -85,9 +84,9 @@ st.markdown("""
         font-weight: 300;
         letter-spacing: 0.5px;
         position: relative;
+        color: #ffffff;
     }
 
-    /* ── School Cards ────────────────────────── */
     .school-card {
         background: #ffffff;
         border: 1px solid #e8edf2;
@@ -104,18 +103,15 @@ st.markdown("""
         border-left-color: #d4af37;
     }
     .school-name {
-        font-family: 'DM Sans', sans-serif;
         font-size: 1.1rem;
         font-weight: 600;
         color: #0d1b2a;
         margin-bottom: 0.3rem;
-        letter-spacing: -0.2px;
     }
     .school-meta {
         font-size: 0.82rem;
         color: #7a8a99;
         margin-bottom: 0.6rem;
-        font-weight: 400;
     }
     .school-desc {
         font-size: 0.9rem;
@@ -124,8 +120,6 @@ st.markdown("""
         line-height: 1.6;
         font-weight: 300;
     }
-
-    /* ── Chips ───────────────────────────────── */
     .chip {
         display: inline-block;
         background: #f0f5ff;
@@ -136,10 +130,7 @@ st.markdown("""
         margin: 2px 3px 2px 0;
         font-weight: 500;
         border: 1px solid #dce8f5;
-        letter-spacing: 0.1px;
     }
-
-    /* ── Filter Banner ───────────────────────── */
     .filter-banner {
         background: linear-gradient(90deg, #e8f0fa, #f5f8ff);
         border-left: 4px solid #1b3a5c;
@@ -150,15 +141,12 @@ st.markdown("""
         margin-bottom: 1.4rem;
         font-weight: 500;
     }
-
-    /* ── Sidebar ─────────────────────────────── */
     .sidebar-title {
         font-family: 'Playfair Display', serif;
         font-size: 1.1rem;
         font-weight: 600;
         color: #0d1b2a;
         margin-bottom: 1rem;
-        letter-spacing: -0.3px;
     }
     .sidebar-step {
         font-size: 0.72rem;
@@ -169,15 +157,12 @@ st.markdown("""
         margin-bottom: 0.3rem;
         margin-top: 0.8rem;
     }
-
-    /* ── Welcome Cards ───────────────────────── */
     .welcome-card {
         background: linear-gradient(135deg, #f8faff, #eef3fb);
         border: 1px solid #dce8f5;
         border-radius: 12px;
         padding: 1.4rem;
         text-align: center;
-        height: 100%;
     }
     .welcome-card .step-num {
         font-family: 'Playfair Display', serif;
@@ -199,8 +184,6 @@ st.markdown("""
         font-weight: 300;
         line-height: 1.5;
     }
-
-    /* ── Agent Cards ─────────────────────────── */
     .agent-card {
         background: white;
         border: 1px solid #e8edf2;
@@ -208,43 +191,27 @@ st.markdown("""
         padding: 1.2rem;
         text-align: center;
         transition: transform 0.2s;
-        height: 100%;
     }
     .agent-card:hover { transform: translateY(-2px); }
     .agent-icon  { font-size: 1.8rem; margin-bottom: 0.5rem; }
     .agent-name  { font-weight: 600; color: #0d1b2a; font-size: 0.9rem; margin-bottom: 0.3rem; }
     .agent-desc  { font-size: 0.78rem; color: #7a8a99; line-height: 1.5; font-weight: 300; }
-
-    /* ── Stats Bar ───────────────────────────── */
-    .stat-bar {
-        display: flex;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-    }
-    .stat-item {
+    .stat-bar    { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-item   {
         flex: 1;
         background: linear-gradient(135deg, #0d1b2a, #1b3a5c);
         border-radius: 12px;
         padding: 1rem;
         text-align: center;
-        color: white;
     }
-    .stat-value {
+    .stat-value  {
         font-family: 'Playfair Display', serif;
         font-size: 1.5rem;
         font-weight: 700;
         color: #d4af37;
     }
-    .stat-label {
-        font-size: 0.72rem;
-        opacity: 0.7;
-        margin-top: 2px;
-        font-weight: 300;
-        letter-spacing: 0.5px;
-    }
-
-    /* ── Footer ──────────────────────────────── */
-    .edu-footer {
+    .stat-label  { font-size: 0.72rem; color: rgba(255,255,255,0.7); margin-top: 2px; font-weight: 300; }
+    .edu-footer  {
         text-align: center;
         padding: 1.5rem 0 0.5rem;
         color: #b0bec5;
@@ -252,20 +219,12 @@ st.markdown("""
         border-top: 1px solid #e8edf2;
         margin-top: 2.5rem;
         font-weight: 300;
-        letter-spacing: 0.3px;
     }
-
-    /* ── No Results ──────────────────────────── */
-    .no-results {
-        text-align: center;
-        padding: 4rem 2rem;
-        color: #b0bec5;
-    }
+    .no-results  { text-align: center; padding: 4rem 2rem; color: #b0bec5; }
     .no-results .icon { font-size: 3rem; margin-bottom: 1rem; }
-    .no-results .msg  { font-size: 1rem; font-weight: 400; }
+    .no-results .msg  { font-size: 1rem; }
     .no-results .sub  { font-size: 0.85rem; margin-top: 0.5rem; font-weight: 300; }
 
-    /* ── Streamlit Overrides ─────────────────── */
     div[data-testid="stButton"] button[kind="primary"] {
         background: linear-gradient(135deg, #0d1b2a, #1b3a5c) !important;
         color: #ffffff !important;
@@ -297,7 +256,7 @@ st.markdown("""
 # ── Load Resources Once ────────────────────────────
 @st.cache_resource(show_spinner=False)
 def get_resources():
-    ensure_data_files()          # ← add this line
+    ensure_data_files()
     df         = load_geo_data()
     collection = load_vector_db()
     return df, collection
@@ -315,7 +274,7 @@ def rating_badge(rating):
     return (
         f'<span style="display:inline-block;background:{bg};'
         f'color:{color};border-radius:20px;padding:3px 12px;'
-        f'font-size:0.78rem;font-weight:600;border:1px solid {bg};">'
+        f'font-size:0.78rem;font-weight:600;">'
         f'⭐ {label} {r}/10</span>'
     )
 
@@ -343,8 +302,6 @@ def render_school_card(row, match_score=None):
         f'🎯 {match_score}% match</span>'
         if match_score else ""
     )
-
-    # Location
     city   = str(row.get("city",   "") or "").strip()
     county = str(row.get("county", "") or "").strip()
     state  = str(row.get("state",  "") or "").strip()
@@ -391,8 +348,6 @@ def render_api_school_card(school):
         f"{student_count:,} students"
         if student_count > 0 else "Enrollment not reported"
     )
-
-    # Location
     city    = str(school.get("city",   "") or "").strip()
     county  = str(school.get("county", "") or "").strip()
     state_v = str(school.get("state",  "") or "").strip()
@@ -407,12 +362,14 @@ def render_api_school_card(school):
     school_type  = str(school.get("type",  "Public"))
     school_level = str(school.get("level", ""))
 
-    # Clean description
     raw_desc   = str(school.get("description", ""))
-    clean_desc = re.sub(r'\b(\w[\w\s]*[Ss]chool)\s+school\b', r'\1', raw_desc)
-    clean_desc = re.sub(r'(Source|Data from):.*$', '', clean_desc).strip()
+    clean_desc = re.sub(
+        r'\b(\w[\w\s]*[Ss]chool)\s+school\b', r'\1', raw_desc
+    )
+    clean_desc = re.sub(
+        r'(Source|Data from):.*$', '', clean_desc
+    ).strip()
 
-    # Website
     website = str(school.get("website", "") or "")
     if website and not website.startswith("http"):
         website = "https://" + website
@@ -421,7 +378,6 @@ def render_api_school_card(school):
         f'style="color:#1b3a5c;">{website[:45]}</a>'
         if website else "Contact school"
     )
-
     app_fee  = int(school.get("application_fee", 0))
     fee_chip = (
         '<span class="chip">📋 No App Fee</span>'
@@ -430,8 +386,6 @@ def render_api_school_card(school):
     )
     rating      = float(school.get("rating", 0.0))
     rating_html = rating_badge(rating) + "&nbsp;" if rating > 0 else ""
-
-    # District chip
     district     = str(school.get("district", "") or "").strip()
     district_html = (
         f'<span class="chip">🏛️ {district[:40]}</span>'
@@ -463,7 +417,6 @@ def render_api_school_card(school):
 # ── Main App ───────────────────────────────────────
 def main():
 
-    # Header
     st.markdown("""
     <div class="main-header">
         <h1>🎓 EduNavigator AI</h1>
@@ -484,6 +437,7 @@ def main():
             unsafe_allow_html=True
         )
 
+        # Step 1: Level
         st.markdown(
             '<div class="sidebar-step">Step 1 — Education Level</div>',
             unsafe_allow_html=True
@@ -494,6 +448,7 @@ def main():
             label_visibility="collapsed"
         )
 
+        # Step 2: State
         st.markdown(
             '<div class="sidebar-step">Step 2 — State</div>',
             unsafe_allow_html=True
@@ -504,15 +459,17 @@ def main():
             label_visibility="collapsed"
         )
 
-        # County (conditional)
+        # Step 3 & 4: County/District + City (K-12 only)
         selected_county = None
+        selected_city   = None
         county_active   = (
             selected_level != "Select Level" and
             is_county_applicable(selected_level)
         )
+
         if county_active:
             st.markdown(
-                '<div class="sidebar-step">Step 3 — County</div>',
+                '<div class="sidebar-step">Step 3 — County / District</div>',
                 unsafe_allow_html=True
             )
             counties = get_counties_for_level(
@@ -520,26 +477,54 @@ def main():
             )
             if counties:
                 selected_county = st.selectbox(
-                    "County",
-                    options=["All Counties"] + counties,
+                    "County / District",
+                    options=["All Districts"] + counties,
                     label_visibility="collapsed"
                 )
             else:
                 st.caption(
-                    f"All counties in {selected_state}"
+                    f"All districts in {selected_state}"
                     if selected_state != "Select State"
                     else "Select a state first"
                 )
+
+            # Step 4: City
+            st.markdown(
+                '<div class="sidebar-step">Step 4 — City (Optional)</div>',
+                unsafe_allow_html=True
+            )
+            cities = (
+                get_cities_for_county(
+                    selected_state,
+                    selected_level,
+                    selected_county
+                )
+                if selected_state != "Select State" else []
+            )
+            if cities:
+                selected_city = st.selectbox(
+                    "City",
+                    options=["All Cities"] + cities,
+                    label_visibility="collapsed"
+                )
+            else:
+                st.caption(
+                    "Select a district to filter by city"
+                )
+
         else:
             if selected_level not in ["Select Level"]:
                 st.markdown(
-                    '<div class="sidebar-step">Step 3 — County</div>',
+                    '<div class="sidebar-step">Step 3 — County / District</div>',
                     unsafe_allow_html=True
                 )
-                st.caption(f"Not applicable for {selected_level}.")
+                st.caption(
+                    f"Not applicable for {selected_level}."
+                )
 
         st.divider()
 
+        # Search Query
         st.markdown(
             '<div class="sidebar-step">Search Query (Optional)</div>',
             unsafe_allow_html=True
@@ -570,6 +555,7 @@ def main():
 
         st.divider()
 
+        # PDF Checklist
         st.markdown(
             '<div class="sidebar-step">PDF Checklist</div>',
             unsafe_allow_html=True
@@ -594,7 +580,6 @@ def main():
     )
 
     if not filters_ready:
-        # Welcome screen
         col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown("""
@@ -622,7 +607,6 @@ def main():
             </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-
         st.markdown("""
         <div class="stat-bar">
             <div class="stat-item">
@@ -684,24 +668,30 @@ def main():
         """, unsafe_allow_html=True)
 
     elif not search_clicked:
-        # Filters selected but Search not clicked
         summary = get_filter_summary(
-            selected_state, selected_level, selected_county
+            selected_state, selected_level,
+            selected_county, selected_city
         )
         st.markdown(
             f'<div class="filter-banner">📍 {summary}</div>',
             unsafe_allow_html=True
         )
+        city_label = (
+            f" · {selected_city}"
+            if selected_city and
+            selected_city != "All Cities" else ""
+        )
         county_label = (
             f" · {selected_county}"
             if selected_county and
-            selected_county != "All Counties" else ""
+            selected_county not in [
+                "All Counties", "All Districts"
+            ] else ""
         )
         st.info(
             f"✅ Filters ready: **{selected_level}** in "
-            f"**{selected_state}**{county_label}\n\n"
-            f"Click **🔍 Search** to find schools. "
-            f"Add a query above for AI-powered results."
+            f"**{selected_state}**{county_label}{city_label}\n\n"
+            f"Click **🔍 Search** to find schools."
         )
 
     else:
@@ -709,30 +699,52 @@ def main():
         # RESULTS
         # ══════════════════════════════════════════
         summary = get_filter_summary(
-            selected_state, selected_level, selected_county
+            selected_state, selected_level,
+            selected_county, selected_city
         )
         st.markdown(
             f'<div class="filter-banner">📍 {summary}</div>',
             unsafe_allow_html=True
         )
 
+        # Build city context for query
+        city_context = (
+            f" in {selected_city}"
+            if selected_city and
+            selected_city != "All Cities" else ""
+        )
         display_query = (
             search_query.strip()
             if search_query.strip()
-            else f"Provide {selected_level} data in {selected_state}"
+            else (
+                f"Provide {selected_level} data "
+                f"in {selected_state}{city_context}"
+            )
         )
 
+        city_label = (
+            f" · {selected_city}"
+            if selected_city and
+            selected_city != "All Cities" else ""
+        )
         st.markdown(
-            f"### 🏫 {selected_level} schools in {selected_state}"
+            f"### 🏫 {selected_level} schools "
+            f"in {selected_state}{city_label}"
         )
 
-        with st.spinner(f"🔍 Finding schools..."):
+        with st.spinner("🔍 Finding schools..."):
             result = orchestrator(
                 collection   = collection,
                 query        = display_query,
                 state        = selected_state,
                 level        = selected_level,
                 county       = selected_county,
+                city         = (
+                    selected_city
+                    if selected_city and
+                    selected_city != "All Cities"
+                    else None
+                ),
                 n_results    = 20,
                 generate_pdf = generate_pdf and bool(pdf_school),
                 school_name  = pdf_school,
@@ -748,7 +760,8 @@ def main():
                 df,
                 state  = selected_state,
                 level  = selected_level,
-                county = selected_county
+                county = selected_county,
+                city   = selected_city
             )
             for school_meta in result["schools"]:
                 match_row = filtered_df[
@@ -762,8 +775,14 @@ def main():
             api_schools = result["api_schools"]
             c1, c2, c3  = st.columns(3)
             c1.metric("Found",   len(api_schools))
-            c2.metric("Public",  len([s for s in api_schools if s.get("type") == "Public"]))
-            c3.metric("Private", len([s for s in api_schools if s.get("type") == "Private"]))
+            c2.metric("Public",  len([
+                s for s in api_schools
+                if s.get("type") == "Public"
+            ]))
+            c3.metric("Private", len([
+                s for s in api_schools
+                if s.get("type") == "Private"
+            ]))
             st.markdown("---")
             for school in api_schools:
                 render_api_school_card(school)
@@ -771,7 +790,9 @@ def main():
         # ── Web Research ───────────────────────────
         if result["web_summary"] and search_query.strip():
             st.markdown("---")
-            with st.expander("🌐 Additional Research", expanded=True):
+            with st.expander(
+                "🌐 Additional Research", expanded=True
+            ):
                 st.markdown(result["web_summary"])
             if result["web_sources"]:
                 st.markdown("**Sources:**")
@@ -781,10 +802,13 @@ def main():
                     )
 
         # ── PDF Download ───────────────────────────
-        if result["pdf_result"] and result["pdf_result"]["filepath"]:
+        if (
+            result["pdf_result"] and
+            result["pdf_result"]["filepath"]
+        ):
             st.markdown("---")
             st.markdown("### 📄 Application Checklist")
-            pdf_path     = result["pdf_result"]["filepath"]
+            pdf_path = result["pdf_result"]["filepath"]
             col_info, col_btn = st.columns([3, 1])
             with col_info:
                 total = sum(
@@ -805,7 +829,9 @@ def main():
                         mime="application/pdf",
                         use_container_width=True
                     )
-            with st.expander("👀 Preview Checklist", expanded=False):
+            with st.expander(
+                "👀 Preview Checklist", expanded=False
+            ):
                 for section, items in (
                     result["pdf_result"]["checklist"].items()
                 ):
@@ -829,7 +855,6 @@ def main():
             </div>
             """, unsafe_allow_html=True)
 
-        # Footer
         st.markdown("""
         <div class="edu-footer">
             EduNavigator AI &nbsp;·&nbsp;

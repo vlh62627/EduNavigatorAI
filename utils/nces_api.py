@@ -10,151 +10,146 @@ from tavily import TavilyClient
 
 load_dotenv()
 
-tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-
+tavily      = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 K12_DB_PATH = "data/k12_schools.csv"
 
 
-def fetch_k12_schools(state, level, county=None, limit=30):
+def fetch_k12_schools(
+    state, level, county=None, city=None, limit=30
+):
     """
     Fetch K-12 schools.
-    Priority order:
+    Priority:
         1. Local NCES CCD database (data/k12_schools.csv)
         2. Tavily web search fallback
     """
     print(f"\n🏫 K-12 Search: {level} in {state}...")
 
-    # ── Priority 1: Local NCES Database ───────────
     if os.path.exists(K12_DB_PATH):
         local_results = _get_from_local_db(
-            state, level, county, limit
+            state, level, county, city, limit
         )
         if local_results:
-            print(
-                f"   ✅ Local DB: "
-                f"{len(local_results)} schools found."
-            )
+            print(f"   ✅ Local DB: {len(local_results)} schools.")
             return local_results
         else:
-            print(
-                f"   ⚠️ Local DB has no results for "
-                f"{level} in {state}. Trying web search..."
-            )
+            print("   ⚠️ No local results. Using web search...")
     else:
-        print(
-            f"   ℹ️ Local K-12 DB not found. "
-            f"Using web search..."
-        )
+        print("   ℹ️ Local DB not found. Using web search...")
 
-    # ── Priority 2: Tavily Web Search ─────────────
     return _tavily_k12_search(state, level, county, limit)
 
 
-def _get_from_local_db(state, level, county=None, limit=30):
-    """
-    Query the local NCES CCD CSV database.
-    Returns list of school dicts or empty list.
-    """
+def _get_from_local_db(
+    state, level, county=None, city=None, limit=30
+):
+    """Query local NCES CCD CSV database."""
     try:
         import pandas as pd
         df = pd.read_csv(K12_DB_PATH, low_memory=False)
     except Exception as e:
-        print(f"   ❌ Error reading local DB: {e}")
+        print(f"   ❌ DB read error: {e}")
         return []
 
+    # Ensure string types
+    for col in ["state", "level", "county", "district", "city", "name"]:
+        if col in df.columns:
+            df[col] = (
+                df[col].fillna("").astype(str)
+                .replace({"nan": "", "None": ""})
+            )
+
     # Filter by state and level
-    mask = (
+    filtered = df[
         (df["state"] == state) &
         (df["level"] == level)
-    )
-    filtered = df[mask].copy()
+    ].copy()
 
     if filtered.empty:
         return []
 
-    # Apply county filter if provided
+    # District / County filter
+    # Matches against district first, then county
     if county and county not in [
-        "All Counties", "Select County", "", "None"
+        "All Counties", "All Districts",
+        "Select County", "Select District", "", "None"
     ]:
-        county_clean = county.replace(" County", "").strip()
-        county_mask  = filtered["county"].str.contains(
-            county_clean, case=False, na=False
+        dist_mask = (
+            filtered["district"].str.contains(
+                county, case=False, na=False
+            ) |
+            filtered["county"].str.contains(
+                county, case=False, na=False
+            )
         )
-        county_filtered = filtered[county_mask]
-        # Only apply county filter if results exist
-        if not county_filtered.empty:
-            filtered = county_filtered
+        dist_filtered = filtered[dist_mask]
+        if not dist_filtered.empty:
+            filtered = dist_filtered
 
-    # Sort by student count descending
-    if "student_count" in filtered.columns:
-        filtered = filtered.sort_values(
-            "student_count", ascending=False
+    # City filter
+    if city and city not in ["All Cities", "Select City", ""]:
+        city_mask     = filtered["city"].str.contains(
+            city, case=False, na=False
         )
+        city_filtered = filtered[city_mask]
+        if not city_filtered.empty:
+            filtered = city_filtered
 
-    filtered = filtered.head(limit).reset_index(drop=True)
+    # Sort by name
+    filtered = (
+        filtered.sort_values("name")
+        .head(limit)
+        .reset_index(drop=True)
+    )
 
-    # Convert to list of dicts in our schema
     schools = []
     for _, row in filtered.iterrows():
-        school_id = str(row.get("school_id", ""))
-        name      = str(row.get("name",      ""))
+        name = str(row.get("name", "") or "")
         if not name or name == "nan":
             continue
 
-        county_val = str(row.get("county", "") or "")
-        if county_val in ["nan", "None", "none"]:
-            county_val = ""
+        def clean(val):
+            s = str(val or "")
+            return "" if s in ["nan", "None", "none", "NaN"] else s
 
-        city_val = str(row.get("city", "") or "")
-        if city_val in ["nan", "None", "none"]:
-            city_val = ""
+        website      = clean(row.get("website",  ""))
+        county_val   = clean(row.get("county",   ""))
+        city_val     = clean(row.get("city",     ""))
+        district_val = clean(row.get("district", ""))
 
-        website_val = str(row.get("website", "") or "")
-        if website_val in ["nan", "None", "none"]:
-            website_val = ""
-        if website_val and not website_val.startswith("http"):
-            website_val = "https://" + website_val
+        if website and not website.startswith("http"):
+            website = "https://" + website
 
-        district_val = str(row.get("district", "") or "")
-        if district_val in ["nan", "None", "none"]:
-            district_val = ""
-
-        student_count = int(
-            row.get("student_count", 0) or 0
-        )
-
-        # Build clean description
         description = _build_description(
-            stype    = str(row.get("type", "Public")),
+            stype    = clean(row.get("type", "Public")),
             level    = level,
             city     = city_val,
             state    = state,
             county   = county_val,
-            district = district_val,
-            students = student_count
+            district = district_val
         )
 
         schools.append({
-            "school_id":            school_id,
+            "school_id":            clean(row.get("school_id", "")),
             "name":                  name,
-            "type":                  str(row.get("type", "Public")),
+            "type":                  clean(row.get("type", "Public")),
             "level":                 level,
             "state":                 state,
             "county":                county_val,
-            "city":                  city_val,
+            "city":                  city_val.title(),
             "district":              district_val,
-            "rating":                float(row.get("rating", 0.0) or 0.0),
+            "rating":                0.0,
             "tuition_min":           0,
             "tuition_max":           0,
-            "student_count":         student_count,
+            "student_count":         0,
             "teacher_student_ratio": "N/A",
             "ap_courses":            0,
             "clubs":                 0,
             "application_deadline":  "Contact school",
-            "website":               website_val,
+            "website":               website,
             "application_fee":       0,
             "description":           description,
-            "source":               "NCES CCD Database"
+            "source":               "NCES CCD 2022-23",
         })
 
     return schools
@@ -162,12 +157,9 @@ def _get_from_local_db(state, level, county=None, limit=30):
 
 def _build_description(
     stype, level, city, state,
-    county="", district="", students=0
+    county="", district=""
 ):
-    """
-    Build a clean description without repeating
-    words or showing internal source info.
-    """
+    """Build clean description without double words."""
     level_map = {
         "Elementary":    "elementary",
         "Middle School": "middle",
@@ -176,45 +168,32 @@ def _build_description(
     }
     level_word = level_map.get(level, level.lower())
 
-    # Build location string
     loc_parts = []
-    if city:
-        loc_parts.append(city)
-    if county and county.lower() not in ["", "nan", "none"]:
-        cty = county.replace(" County", "").strip()
-        if cty:
-            loc_parts.append(f"{cty} County")
+    if city and city not in ["nan", "None", ""]:
+        loc_parts.append(city.title())
+    if district and district not in ["nan", "None", ""]:
+        loc_parts.append(district)
+    elif county and county not in ["nan", "None", ""]:
+        loc_parts.append(f"{county} County")
     if state:
         loc_parts.append(state)
     location = ", ".join(loc_parts) if loc_parts else state
 
-    desc = f"{stype} {level_word} school in {location}."
-
-    if district and district.lower() not in ["nan", "none", ""]:
-        desc += f" Part of {district}."
-
-    if students > 0:
-        desc += f" Enrollment: {students:,} students."
-
-    return desc
+    return f"{stype} {level_word} school in {location}."
 
 
 def _tavily_k12_search(state, level, county=None, limit=10):
-    """
-    Tavily web search fallback for K-12 schools.
-    Used when local NCES database is not available
-    or has no results for the given state/level.
-    """
-    print(f"   🌐 Web search: {level} schools in {state}...")
+    """Tavily web search fallback."""
+    print(f"   🌐 Web search: {level} in {state}...")
 
     location = (
-        f"{county} County, {state}"
+        f"{county}, {state}"
         if county and county not in [
-            "All Counties", "Select County", ""
+            "All Counties", "All Districts",
+            "Select County", ""
         ]
         else state
     )
-
     query = (
         f"list of {level} schools in {location} "
         f"with school names and addresses"
@@ -228,55 +207,46 @@ def _tavily_k12_search(state, level, county=None, limit=10):
         )
         web_results = results.get("results", [])
     except Exception as e:
-        print(f"   ❌ Web search error: {e}")
+        print(f"   ❌ Search error: {e}")
         return []
 
     if not web_results:
-        print("   ⚠️ No web results found.")
         return []
 
     schools    = []
     seen_names = set()
 
     for result in web_results:
-        content = (
+        content   = (
             result.get("content", "") + " " +
             result.get("title",   "")
         )
-        url = result.get("url", "")
-
+        url       = result.get("url", "")
         extracted = _extract_school_names(content, level)
 
         for school_info in extracted:
             name = school_info["name"]
-
             if name in seen_names or len(name) < 5:
                 continue
             seen_names.add(name)
 
-            city         = school_info.get("city",   "")
-            county_found = school_info.get("county", county or "")
-
             description = _build_description(
-                stype   = school_info.get("type", "Public"),
-                level   = level,
-                city    = city,
-                state   = state,
-                county  = county_found
+                stype    = school_info.get("type", "Public"),
+                level    = level,
+                city     = school_info.get("city", ""),
+                state    = state,
+                district = county or ""
             )
 
             schools.append({
-                "school_id": (
-                    f"TAV_{name[:12].replace(' ', '_')}"
-                    f"_{state[:2]}"
-                ),
+                "school_id":            f"TAV_{name[:12].replace(' ','_')}_{state[:2]}",
                 "name":                  name,
                 "type":                  school_info.get("type", "Public"),
                 "level":                 level,
                 "state":                 state,
-                "county":                county_found,
-                "city":                  city,
-                "district":              "",
+                "county":                school_info.get("county", county or ""),
+                "city":                  school_info.get("city", ""),
+                "district":              county or "",
                 "rating":                0.0,
                 "tuition_min":           0,
                 "tuition_max":           0,
@@ -285,9 +255,7 @@ def _tavily_k12_search(state, level, county=None, limit=10):
                 "ap_courses":            0,
                 "clubs":                 0,
                 "application_deadline":  "Contact school",
-                "website": (
-                    url if "school" in url.lower() else ""
-                ),
+                "website":               url if "school" in url.lower() else "",
                 "application_fee":       0,
                 "description":           description,
                 "source":               "Web Search"
@@ -299,133 +267,79 @@ def _tavily_k12_search(state, level, county=None, limit=10):
         if len(schools) >= limit:
             break
 
-    # Fallback to titles if content parsing yielded nothing
     if not schools:
         schools = _fallback_from_titles(
             web_results, level, state, county, limit
         )
 
-    print(f"   ✅ Web search found {len(schools)} schools.")
+    print(f"   ✅ Web search: {len(schools)} schools.")
     return schools
 
 
 def _extract_school_names(content, level):
-    """
-    Extract school names from web content using
-    pattern matching.
-    """
+    """Extract school names from web content."""
     schools  = []
     lines    = content.split("\n")
 
     level_keywords = {
-        "Elementary":    [
-            "elementary", "elem", "primary", "grade school"
-        ],
-        "Middle School": [
-            "middle", "intermediate", "junior high"
-        ],
-        "High School":   [
-            "high school", "senior high", "high sch"
-        ],
-        "Preschool":     [
-            "preschool", "pre-k", "prekindergarten",
-            "early learning", "head start"
-        ],
+        "Elementary":    ["elementary", "elem", "primary"],
+        "Middle School": ["middle", "intermediate", "junior high"],
+        "High School":   ["high school", "senior high"],
+        "Preschool":     ["preschool", "pre-k", "early learning"],
     }
     keywords = level_keywords.get(level, ["school"])
 
     skip_patterns = [
-        r"^#+\s",
-        r"^here are",
-        r"^best\s",
-        r"^top\s+\d",
-        r"^list of",
-        r"^the best",
-        r"^\d+\s+best",
-        r"^according",
-        r"^schools in",
-        r"^public school",
-        r"^\*\*",
-        r"^source:",
-        r"^data from:",
-        r"https?://",
-        r"^search result",
-        r"^ranked",
-        r"^rating",
-        r"^\d+\.",
-        r"^see also",
+        r"^#+\s", r"^here are", r"^best\s",
+        r"^top\s+\d", r"^list of", r"^the best",
+        r"^\d+\s+best", r"^according", r"^schools in",
+        r"^public school", r"^\*\*", r"^source:",
+        r"^data from:", r"https?://", r"^ranked",
     ]
-
     generic_phrases = [
         "here are", "best schools", "top schools",
         "list of", "schools in", "public schools",
-        "private schools", "high schools in",
-        "elementary schools in", "middle schools in",
-        "preschools in", "find schools", "search schools",
-        "all schools", "local schools"
+        "find schools", "all schools",
     ]
 
     for line in lines:
         line_clean = line.strip()
-
         if len(line_clean) < 8 or len(line_clean) > 80:
             continue
-
         line_lower = line_clean.lower()
-
-        should_skip = any(
-            re.match(pat, line_lower)
-            for pat in skip_patterns
-        )
-        if should_skip:
+        if any(re.match(p, line_lower) for p in skip_patterns):
             continue
-
         if not any(kw in line_lower for kw in keywords):
             continue
 
-        # Clean name
         name = re.sub(r"^#+\s*",           "", line_clean)
         name = re.sub(r"^\d+[\.\)\-]\s*",  "", name)
         name = re.sub(r"\s*[-–|:]\s*.*$",  "", name)
         name = re.sub(r"\*+",              "", name)
-        name = re.sub(r"\s+",              " ", name)
-        name = name.strip().strip("•·").strip()
+        name = re.sub(r"\s+",              " ", name).strip()
+        name = name.strip("•·").strip()
 
-        word_count = len(name.split())
-        if word_count > 8 or word_count < 2:
+        if len(name.split()) > 8 or len(name.split()) < 2:
             continue
-
-        if any(
-            phrase in name.lower()
-            for phrase in generic_phrases
+        if any(p in name.lower() for p in generic_phrases):
+            continue
+        if not any(
+            w[0].isupper() for w in name.split() if len(w) > 1
         ):
             continue
 
-        # Must have at least one proper noun
-        words          = name.split()
-        has_proper_noun = any(
-            w[0].isupper() for w in words if len(w) > 1
-        )
-        if not has_proper_noun:
-            continue
-
-        # School type
         stype = "Public"
         if any(w in line_lower for w in [
             "private", "academy", "montessori",
-            "christian", "catholic", "independent"
+            "christian", "catholic"
         ]):
             stype = "Private"
         if "charter" in line_lower:
             stype = "Charter"
-        if "magnet" in line_lower:
-            stype = "Magnet"
 
         schools.append({
-            "name":   name,
-            "type":   stype,
-            "city":   "",
-            "county": ""
+            "name": name, "type": stype,
+            "city": "", "county": ""
         })
 
     return schools
@@ -434,22 +348,13 @@ def _extract_school_names(content, level):
 def _fallback_from_titles(
     web_results, level, state, county, limit
 ):
-    """
-    Last resort — build school entries from
-    search result titles when content parsing
-    yields nothing.
-    """
+    """Last resort — build entries from search titles."""
     schools = []
-
     skip_phrases = [
         "here are", "best schools", "top schools",
-        "list of", "schools in", "ranked", "ranking",
-        "overview", "guide to", "how to find",
-        "what is", "about ", "wikipedia",
-        "find schools", "search for", "directory",
-        "all schools", "public schools in"
+        "list of", "schools in", "ranked",
+        "overview", "guide", "wikipedia", "directory",
     ]
-
     level_keywords = {
         "Elementary":    ["elementary", "elem", "primary"],
         "Middle School": ["middle", "intermediate"],
@@ -461,47 +366,27 @@ def _fallback_from_titles(
     for r in web_results[:limit]:
         title = r.get("title", "").strip()
         url   = r.get("url",   "")
-
         if not title or len(title) < 5:
             continue
-
-        title_lower = title.lower()
-
-        if any(phrase in title_lower for phrase in skip_phrases):
+        if any(p in title.lower() for p in skip_phrases):
+            continue
+        if not any(kw in title.lower() for kw in kws):
             continue
 
-        if not any(kw in title_lower for kw in kws):
-            continue
-
-        # Clean title
         name = re.sub(r"\s*[-–|]\s*.*$", "", title).strip()
         name = re.sub(r"\s+", " ", name).strip()
-
-        if len(name) > 80 or len(name.split()) > 9:
+        if len(name) > 80 or len(name.split()) > 9 or len(name) < 5:
             continue
-        if len(name) < 5:
-            continue
-
-        description = _build_description(
-            stype  = "Public",
-            level  = level,
-            city   = "",
-            state  = state,
-            county = county or ""
-        )
 
         schools.append({
-            "school_id": (
-                f"TAV_{name[:12].replace(' ', '_')}"
-                f"_{state[:2]}"
-            ),
+            "school_id":            f"TAV_{name[:12].replace(' ','_')}_{state[:2]}",
             "name":                  name,
             "type":                  "Public",
             "level":                 level,
             "state":                 state,
             "county":                county or "",
             "city":                  "",
-            "district":              "",
+            "district":              county or "",
             "rating":                0.0,
             "tuition_min":           0,
             "tuition_max":           0,
@@ -512,8 +397,10 @@ def _fallback_from_titles(
             "application_deadline":  "Contact school",
             "website":               url,
             "application_fee":       0,
-            "description":           description,
-            "source":               "Web Search"
+            "description":           _build_description(
+                "Public", level, "", state, county or ""
+            ),
+            "source": "Web Search"
         })
 
     return schools
