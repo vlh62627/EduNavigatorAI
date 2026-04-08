@@ -1,0 +1,26 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Large data files
+data/nces_schools.csv
+data/k12_schools.csv
+data/k12_schools_sample.csv
+data/zip_county.csv
+
+# ChromaDB
+chroma_db/
+
+# Outputs
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+.streamlit/secrets.toml
+
+API Keys.txt
