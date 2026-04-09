@@ -4,8 +4,7 @@ langchain==0.2.6
 langchain-groq==0.1.6
 langchain-community==0.2.6
 chromadb==0.5.3
-sentence-transformers==2.7.0
-tavily-python==0.3.3
+tavily-python==0.7.23
 fpdf2==2.7.9
 pandas==2.2.2
 python-dotenv==1.0.1

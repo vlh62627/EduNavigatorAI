@@ -7,31 +7,30 @@ logging.getLogger("chromadb").setLevel(logging.ERROR)
 import pandas as pd
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+from chromadb.utils  import embedding_functions
 from dotenv import load_dotenv
 
 load_dotenv()
 
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
-EMBED_MODEL    = os.getenv("EMBED_MODEL",    "all-MiniLM-L6-v2")
 COLLECTION     = "schools"
 
-# ── Embedding model — lazy loaded once ────────────
-_embed_model = None
+# ── Embedding function — lazy loaded once ─────────
+_embed_fn = None
 
 
 def get_embed_model():
     """
-    Load embedding model once and reuse.
-    Lazy loading prevents issues with Streamlit
-    cache context and module imports.
+    Load ChromaDB default embedding function once.
+    Uses onnx-based all-MiniLM-L6-v2 — no torch needed.
+    Much lighter than sentence-transformers for deployment.
     """
-    global _embed_model
-    if _embed_model is None:
-        print("🔄 Loading embedding model...")
-        _embed_model = SentenceTransformer(EMBED_MODEL)
-        print("✅ Embedding model loaded.")
-    return _embed_model
+    global _embed_fn
+    if _embed_fn is None:
+        print("🔄 Loading embedding function...")
+        _embed_fn = embedding_functions.DefaultEmbeddingFunction()
+        print("✅ Embedding function loaded.")
+    return _embed_fn
 
 
 def get_chroma_client():
@@ -45,8 +44,7 @@ def get_chroma_client():
 def build_document(row):
     """
     Convert one CSV row into a rich text document
-    for embedding. The richer the text, the better
-    the RAG retrieval quality.
+    for embedding.
     """
     return f"""
 School Name: {row['name']}
@@ -65,7 +63,7 @@ Description: {row['description']}
 
 def load_vector_db():
     """
-    Load ChromaDB. If already populated, skip
+    Load ChromaDB. If already populated skip
     re-embedding to save time on subsequent runs.
     """
     client     = get_chroma_client()
@@ -79,8 +77,8 @@ def load_vector_db():
         return collection
 
     print("🔄 Building vector database from CSV...")
-    df    = pd.read_csv("data/schools.csv")
-    model = get_embed_model()
+    df     = pd.read_csv("data/schools.csv")
+    embed  = get_embed_model()
 
     documents  = []
     embeddings = []
@@ -89,7 +87,7 @@ def load_vector_db():
 
     for _, row in df.iterrows():
         text      = build_document(row)
-        embedding = model.encode(text).tolist()
+        embedding = embed([text])[0]
 
         documents.append(text)
         embeddings.append(embedding)
@@ -124,9 +122,8 @@ def load_vector_db():
 def query_vector_db(collection, query_text, filters=None, n_results=5):
     """
     Semantic search with optional metadata filters.
-    filters example: {"state": "Texas", "level": "High School"}
     """
-    query_embedding = get_embed_model().encode(query_text).tolist()
+    query_embedding = get_embed_model()([query_text])[0]
 
     where_clause = {}
     if filters:
@@ -155,12 +152,11 @@ def query_vector_db(collection, query_text, filters=None, n_results=5):
 def cache_api_schools(collection, schools, source="api"):
     """
     Cache API-fetched schools into ChromaDB so
-    repeat queries are instant without API calls.
+    repeat queries are instant.
     """
     if not schools:
         return
 
-    # Get existing IDs to avoid duplicates
     try:
         existing     = collection.get()
         existing_ids = set(existing.get("ids", []))
@@ -172,14 +168,13 @@ def cache_api_schools(collection, schools, source="api"):
     metadatas  = []
     ids        = []
 
-    model = get_embed_model()
+    embed = get_embed_model()
 
     for school in schools:
         school_id = str(school.get("school_id", ""))
         if not school_id or school_id in existing_ids:
             continue
 
-        # Build rich document for embedding
         doc = f"""
 School Name: {school.get('name', '')}
 Type: {school.get('type', '')} | Level: {school.get('level', '')}
@@ -189,7 +184,7 @@ Students: {school.get('student_count', 0)}
 Description: {school.get('description', '')}
 """.strip()
 
-        embedding = model.encode(doc).tolist()
+        embedding = embed([doc])[0]
 
         documents.append(doc)
         embeddings.append(embedding)
@@ -226,8 +221,7 @@ Description: {school.get('description', '')}
 def is_cached(collection, state, level):
     """
     Check if schools for this state + level
-    combination are already in ChromaDB.
-    Returns True if cache hit, False if miss.
+    are already in ChromaDB.
     """
     try:
         results = collection.get(
@@ -245,25 +239,16 @@ def is_cached(collection, state, level):
 
 
 def get_cache_stats(collection):
-    """
-    Return stats about what is currently cached.
-    Useful for debugging and UI display.
-    """
+    """Return stats about what is currently cached."""
     try:
-        total = collection.count()
-        all_meta = collection.get(
-            include=["metadatas"]
-        )
+        total     = collection.count()
+        all_meta  = collection.get(include=["metadatas"])
         metadatas = all_meta.get("metadatas", [])
-
-        states = set()
-        levels = set()
+        states    = set()
+        levels    = set()
         for m in metadatas:
-            if m.get("state"):
-                states.add(m["state"])
-            if m.get("level"):
-                levels.add(m["level"])
-
+            if m.get("state"): states.add(m["state"])
+            if m.get("level"): levels.add(m["level"])
         return {
             "total":  total,
             "states": len(states),

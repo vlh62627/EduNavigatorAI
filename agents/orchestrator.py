@@ -64,19 +64,27 @@ def orchestrator(
     if county and county not in ["All Counties", "Select County"]:
         filters["county"] = county
 
-    # Check local CSV data
+    # ── Check local CSV data ──────────────────────
     local_data_exists = False
     if df is not None and state and level:
         local_data_exists = has_local_data(df, state, level)
     response["has_local_data"] = local_data_exists
 
-    # Check ChromaDB cache
-    cache_hit = False
-    if not local_data_exists and state and level:
-        cache_hit = is_cached(collection, state, level)
-        if cache_hit:
-            print(f"\n⚡ Cache HIT for {level} in {state}.")
-            response["from_cache"] = True
+    # ── For K-12 always use NCES database ─────────
+    # Never use cache for K-12 — cache has no district
+    # filtering capability, always fetch fresh from NCES
+    if level in K12_LEVELS:
+        local_data_exists = False
+        cache_hit         = False
+        print(f"   ℹ️ K-12 — fetching from NCES database.")
+    else:
+        # ── Check ChromaDB cache (universities only) ─
+        cache_hit = False
+        if not local_data_exists and state and level:
+            cache_hit = is_cached(collection, state, level)
+            if cache_hit:
+                print(f"\n⚡ Cache HIT for {level} in {state}.")
+                response["from_cache"] = True
 
     # ══════════════════════════════════════════════
     # STEP 1 — Librarian Agent (local CSV or cache)
@@ -114,6 +122,7 @@ def orchestrator(
 
         elif level in K12_LEVELS:
             print(f"\n📋 Step 2: NCES K-12 Search...")
+            print(f"   DEBUG county='{county}' city='{city}'")
             api_schools = fetch_k12_schools(
                 state  = state,
                 level  = level,
@@ -153,8 +162,9 @@ def orchestrator(
         (not local_data_exists and
          not cache_hit and
          not api_schools)     or
-        is_specific_school    or
-        is_auto_query
+        is_specific_school
+        # Removed is_auto_query — NCES results
+        # are sufficient for K-12 auto queries
     )
 
     if needs_web:

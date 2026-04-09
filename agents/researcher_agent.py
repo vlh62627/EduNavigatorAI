@@ -42,9 +42,8 @@ def researcher_agent(query, state=None, level=None, n_results=5):
     try:
         search_results = tavily.search(
             query      = search_query,
-            max_results= n_results,
-            search_depth="advanced"
-        )
+            max_results= n_results
+                )
         web_results = search_results.get("results", [])
         print(f"   ✅ Found {len(web_results)} web results.")
     except Exception as e:
