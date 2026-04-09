@@ -94,11 +94,10 @@ def fetch_universities(state, level="University", per_page=20):
     if level == "Community College":
         params["school.degrees_awarded.predominant"] = 2
     elif level == "Medical School":
-        # Carnegie classification 17 = Medical schools
-        # Carnegie classification 18 = Other health professions
-        # Use broader search then filter by name
+        # Get all grad schools then filter by health keywords
         params["school.degrees_awarded.predominant__range"] = "3..4"
-        params["per_page"] = 100  # Get more to filter from
+        params["per_page"] = 100
+        params["_sort"] = "school.name:asc"
     elif level == "University":
         params["school.degrees_awarded.predominant__range"] = "3..4"
 
@@ -118,22 +117,21 @@ def fetch_universities(state, level="University", per_page=20):
     for r in results:
         name = r.get("school.name", "Unknown")
 
-        # Filter medical schools by name or program keywords
+        # Filter medical schools
         if level == "Medical School":
             name_lower = name.lower()
-            # Also check city/description context
-            match = any(kw in name_lower for kw in MEDICAL_KEYWORDS)
-            # Include schools with health in name
             health_keywords = [
                 "health", "medicine", "medical", "pharmacy",
                 "nursing", "dental", "osteopathic", "physician",
-                "surgery", "clinical", "hospital", "college of medicine",
-                "school of medicine", "health sciences", "biomedical"
+                "surgery", "clinical", "hospital", "biomedical",
+                "optometry", "chiropractic", "veterinary",
+                "icahn", "weill", "pritzker", "feinberg",
+                "perelman", "keck", "geffen", "grossman",
+                "college of medicine", "school of medicine",
+                "health sciences", "health professions",
+                "allied health", "public health"
             ]
-            match = match or any(
-                kw in name_lower for kw in health_keywords
-            )
-            if not match:
+            if not any(kw in name_lower for kw in health_keywords):
                 continue
 
         # Ownership type
