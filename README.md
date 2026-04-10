@@ -206,14 +206,6 @@ python utils/build_k12_database.py
 
 ---
 
-## 📸 Screenshots
-
-| Welcome Screen | Search Results | PDF Checklist |
-|---|---|---|
-| Smart filters with 4-step selection | School cards with programs, tuition, enrollment | AI-generated application checklist |
-
----
-
 ## 🤝 Contributing
 
 Pull requests are welcome! For major changes, please open an issue first.
@@ -225,7 +217,7 @@ Pull requests are welcome! For major changes, please open an issue first.
 **Vijay Kumar Panguluri**
 Capstone Project — April 2026
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue)](https://www.linkedin.com/in/your-profile)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue)](https://www.linkedin.com/in/vijay-panguluri)
 [![GitHub](https://img.shields.io/badge/GitHub-Follow-black)](https://github.com/vlh62627)
 
 ---
