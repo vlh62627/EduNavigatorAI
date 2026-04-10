@@ -95,9 +95,16 @@ def _get_from_local_db(
         if not city_filtered.empty:
             filtered = city_filtered
 
-    # Sort by name
+    # Sort: Public first, then Charter, then Private, then by name
+    type_order = {"Public": 0, "Charter": 1, "Magnet": 2,
+                  "Vocational": 3, "Private": 4, "Special Ed": 5}
+    filtered["_type_order"] = filtered["type"].map(
+        lambda t: type_order.get(t, 9)
+    )
     filtered = (
-        filtered.sort_values("name")
+        filtered
+        .sort_values(["_type_order", "name"])
+        .drop(columns=["_type_order"])
         .head(limit)
         .reset_index(drop=True)
     )

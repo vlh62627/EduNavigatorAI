@@ -8,10 +8,9 @@ from groq import Groq
 from dotenv import load_dotenv
 from utils.embeddings import query_vector_db
 
-load_dotenv()
+load_dotenv(override=True)
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-client     = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
 def librarian_agent(collection, query, filters=None, n_results=5):
@@ -25,14 +24,18 @@ def librarian_agent(collection, query, filters=None, n_results=5):
             - summary   : LLM-generated comparison summary
             - has_data  : True if local results were found
     """
+    # ── Initialize client fresh each call ─────────
+    # Avoids stale key issues when module loads before .env
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
     print(f"\n📚 Librarian Agent activated for: '{query}'")
 
     # ── Step 1: Semantic search in ChromaDB ───────
     results = query_vector_db(
         collection,
         query,
-        filters=filters,
-        n_results=n_results
+        filters   = filters,
+        n_results = n_results
     )
 
     schools   = results.get("metadatas", [[]])[0]
@@ -52,8 +55,10 @@ def librarian_agent(collection, query, filters=None, n_results=5):
     # ── Step 2: Build context for LLM ─────────────
     school_context = ""
     for i, (doc, dist) in enumerate(zip(documents, distances)):
-        match_score    = round((1 - dist) * 100, 1)
-        school_context += f"\n--- School {i+1} (Match: {match_score}%) ---\n"
+        match_score     = round((1 - dist) * 100, 1)
+        school_context += (
+            f"\n--- School {i+1} (Match: {match_score}%) ---\n"
+        )
         school_context += doc + "\n"
 
     # ── Step 3: Chain-of-Thought prompt ───────────
@@ -89,14 +94,15 @@ Keep the total response under 200 words. Be specific and helpful.
     print("   🤖 Generating AI summary...")
     try:
         response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
+            model    = GROQ_MODEL,
+            messages = [
                 {
                     "role": "system",
                     "content": (
-                        "You are EduNavigator AI, a helpful and knowledgeable "
-                        "educational consultant. Give concise, accurate, and "
-                        "practical advice to students and parents."
+                        "You are EduNavigator AI, a helpful and "
+                        "knowledgeable educational consultant. Give "
+                        "concise, accurate, and practical advice to "
+                        "students and parents."
                     )
                 },
                 {
@@ -104,8 +110,8 @@ Keep the total response under 200 words. Be specific and helpful.
                     "content": cot_prompt
                 }
             ],
-            max_tokens=400,
-            temperature=0.3
+            max_tokens  = 400,
+            temperature = 0.3
         )
         summary = response.choices[0].message.content
         print("   ✅ AI summary generated.")

@@ -8,11 +8,9 @@ from groq import Groq
 from tavily import TavilyClient
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
-GROQ_MODEL  = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-tavily      = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
 def researcher_agent(query, state=None, level=None, n_results=5):
@@ -26,6 +24,10 @@ def researcher_agent(query, state=None, level=None, n_results=5):
             - summary     : LLM-generated summary from web data
             - sources     : list of source URLs found
     """
+    # ── Initialize clients fresh each call ────────
+    groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    tavily      = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+
     print(f"\n🔍 Researcher Agent activated for: '{query}'")
 
     # ── Step 1: Build targeted search query ───────
@@ -35,15 +37,18 @@ def researcher_agent(query, state=None, level=None, n_results=5):
     if level:
         location_context += f" {level}"
 
-    search_query = f"{query}{location_context} ratings fees admission requirements 2024"
+    search_query = (
+        f"{query}{location_context} "
+        f"ratings fees admission requirements 2024"
+    )
     print(f"   🌐 Searching web for: '{search_query}'")
 
     # ── Step 2: Tavily web search ──────────────────
     try:
         search_results = tavily.search(
-            query      = search_query,
-            max_results= n_results
-                )
+            query       = search_query,
+            max_results = n_results
+        )
         web_results = search_results.get("results", [])
         print(f"   ✅ Found {len(web_results)} web results.")
     except Exception as e:
@@ -66,8 +71,8 @@ def researcher_agent(query, state=None, level=None, n_results=5):
     sources     = []
     for i, result in enumerate(web_results):
         web_context += f"\n--- Source {i+1} ---\n"
-        web_context += f"Title  : {result.get('title', 'N/A')}\n"
-        web_context += f"URL    : {result.get('url', 'N/A')}\n"
+        web_context += f"Title  : {result.get('title',   'N/A')}\n"
+        web_context += f"URL    : {result.get('url',     'N/A')}\n"
         web_context += f"Content: {result.get('content', 'N/A')[:500]}\n"
         sources.append({
             "title": result.get("title", "N/A"),
@@ -110,8 +115,8 @@ Keep response under 250 words. Be specific and factual.
     print("   🤖 Synthesizing web results with AI...")
     try:
         response = groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
+            model       = GROQ_MODEL,
+            messages    = [
                 {
                     "role": "system",
                     "content": (
@@ -126,8 +131,8 @@ Keep response under 250 words. Be specific and factual.
                     "content": cot_prompt
                 }
             ],
-            max_tokens=500,
-            temperature=0.2
+            max_tokens  = 500,
+            temperature = 0.2
         )
         summary = response.choices[0].message.content
         print("   ✅ Web research summary generated.")

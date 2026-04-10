@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import warnings
 warnings.filterwarnings("ignore")
@@ -9,19 +10,21 @@ from fpdf import FPDF
 from dotenv import load_dotenv
 from datetime import datetime
 
-load_dotenv()
+load_dotenv(override=True)
 
-GROQ_MODEL   = os.getenv("GROQ_MODEL",   "llama-3.3-70b-versatile")
-OUTPUT_PATH  = os.getenv("OUTPUT_PATH",  "./outputs")
-groq_client  = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_MODEL  = os.getenv("GROQ_MODEL",  "llama-3.3-70b-versatile")
+OUTPUT_PATH = os.getenv("OUTPUT_PATH", "./outputs")
 
 os.makedirs(OUTPUT_PATH, exist_ok=True)
 
 
-def _generate_checklist_items(school_name, level, state, extra_context=""):
+def _generate_checklist_items(
+    groq_client, school_name, level, state, extra_context=""
+):
     """
     Use Groq LLM with CoT prompting to generate a
     personalized application checklist for a school.
+    Accepts groq_client as parameter to avoid module-level init.
     """
     cot_prompt = f"""
 You are EduNavigator AI, an expert college and school admissions consultant.
@@ -71,8 +74,8 @@ Return ONLY a JSON object in exactly this format, no other text:
 }}
 """
     response = groq_client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
+        model       = GROQ_MODEL,
+        messages    = [
             {
                 "role": "system",
                 "content": (
@@ -86,8 +89,8 @@ Return ONLY a JSON object in exactly this format, no other text:
                 "content": cot_prompt
             }
         ],
-        max_tokens=800,
-        temperature=0.1
+        max_tokens  = 800,
+        temperature = 0.1
     )
     return response.choices[0].message.content
 
@@ -102,7 +105,11 @@ def _build_pdf(school_name, level, state, checklist_data, tips):
             self.set_font("Helvetica", "B", 16)
             self.set_text_color(255, 255, 255)
             self.set_xy(0, 8)
-            self.cell(0, 12, "EduNavigator AI - Application Checklist", align="C")
+            self.cell(
+                0, 12,
+                "EduNavigator AI - Application Checklist",
+                align="C"
+            )
             self.set_text_color(0, 0, 0)
             self.ln(24)
 
@@ -177,7 +184,11 @@ def _build_pdf(school_name, level, state, checklist_data, tips):
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(255, 255, 255)
         pdf.set_x(10)
-        pdf.cell(190, 8, "  Pro Tips from EduNavigator AI", fill=True, ln=True)
+        pdf.cell(
+            190, 8,
+            "  Pro Tips from EduNavigator AI",
+            fill=True, ln=True
+        )
         pdf.ln(2)
 
         pdf.set_font("Helvetica", "", 10)
@@ -195,7 +206,9 @@ def _build_pdf(school_name, level, state, checklist_data, tips):
     return filepath
 
 
-def doc_specialist_agent(school_name, level, state, extra_context=""):
+def doc_specialist_agent(
+    school_name, level, state, extra_context=""
+):
     """
     Document Specialist Agent — generates a personalized
     PDF application checklist for a given school.
@@ -207,17 +220,19 @@ def doc_specialist_agent(school_name, level, state, extra_context=""):
             - tips         : list of pro tips
             - school_name  : name of the school
     """
-    print(f"\n📄 Doc Specialist Agent activated for: '{school_name}'")
+    # ── Initialize client fresh each call ─────────
+    groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    print(f"\n📄 Doc Specialist Agent: '{school_name}'")
 
     # ── Step 1: Generate checklist via LLM ────────
     print("   🤖 Generating personalized checklist...")
     try:
         raw_response = _generate_checklist_items(
-            school_name, level, state, extra_context
+            groq_client, school_name, level, state, extra_context
         )
 
         # Clean response and parse JSON
-        import json
         clean = raw_response.strip()
         if clean.startswith("```"):
             clean = clean.split("```")[1]
@@ -225,23 +240,40 @@ def doc_specialist_agent(school_name, level, state, extra_context=""):
                 clean = clean[4:]
         clean = clean.strip()
 
-        parsed      = json.loads(clean)
-        checklist   = parsed.get("checklist", {})
-        tips        = parsed.get("tips", [])
-        print(f"   ✅ Checklist generated with {sum(len(v) for v in checklist.values())} items.")
+        parsed    = json.loads(clean)
+        checklist = parsed.get("checklist", {})
+        tips      = parsed.get("tips", [])
+        print(
+            f"   ✅ Checklist generated: "
+            f"{sum(len(v) for v in checklist.values())} items."
+        )
 
     except Exception as e:
         print(f"   ❌ LLM/parse error: {e}")
         # Fallback checklist
         checklist = {
-            "Academic Documents":       ["Official transcripts", "Test scores (SAT/ACT if applicable)"],
-            "Personal Documents":       ["Government-issued ID", "Proof of residency"],
-            "Application Requirements": ["Completed application form", "Personal statement or essay"],
-            "Financial Documents":      ["Financial aid forms (FAFSA if applicable)", "Proof of income"],
-            "Important Deadlines":      ["Check school website for current deadlines"]
+            "Academic Documents": [
+                "Official transcripts",
+                "Test scores (SAT/ACT if applicable)"
+            ],
+            "Personal Documents": [
+                "Government-issued ID",
+                "Proof of residency"
+            ],
+            "Application Requirements": [
+                "Completed application form",
+                "Personal statement or essay"
+            ],
+            "Financial Documents": [
+                "Financial aid forms (FAFSA if applicable)",
+                "Proof of income"
+            ],
+            "Important Deadlines": [
+                "Check school website for current deadlines"
+            ]
         }
         tips = [
-            "Start your application at least 3 months before the deadline.",
+            "Start your application at least 3 months before deadline.",
             "Keep copies of all submitted documents.",
             "Follow up with the admissions office after submission."
         ]
@@ -249,8 +281,10 @@ def doc_specialist_agent(school_name, level, state, extra_context=""):
     # ── Step 2: Build PDF ──────────────────────────
     print("   📝 Building PDF checklist...")
     try:
-        filepath = _build_pdf(school_name, level, state, checklist, tips)
-        print(f"   ✅ PDF saved to: {filepath}")
+        filepath = _build_pdf(
+            school_name, level, state, checklist, tips
+        )
+        print(f"   ✅ PDF saved: {filepath}")
     except Exception as e:
         print(f"   ❌ PDF error: {e}")
         filepath = None

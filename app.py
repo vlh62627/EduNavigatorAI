@@ -14,6 +14,7 @@ from utils.geo_filter import (
     is_county_applicable,
     get_counties_for_level,
     get_cities_for_county,
+    get_cities_for_university,
     filter_schools,
     get_filter_summary,
     has_local_data
@@ -22,7 +23,7 @@ from utils.embeddings    import load_vector_db
 from agents.orchestrator import orchestrator
 from utils.startup       import ensure_data_files
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ── Page Configuration ─────────────────────────────
 st.set_page_config(
@@ -86,7 +87,6 @@ st.markdown("""
         position: relative;
         color: #ffffff;
     }
-
     .school-card {
         background: #ffffff;
         border: 1px solid #e8edf2;
@@ -130,6 +130,25 @@ st.markdown("""
         margin: 2px 3px 2px 0;
         font-weight: 500;
         border: 1px solid #dce8f5;
+    }
+    .program-chip {
+        display: inline-block;
+        background: #f0f4f8;
+        color: #2c3e50;
+        border-radius: 20px;
+        padding: 3px 10px;
+        font-size: 0.74rem;
+        margin: 2px 3px 2px 0;
+        font-weight: 500;
+        border: 1px solid #d0dce8;
+    }
+    .programs-label {
+        font-size: 0.72rem;
+        color: #7a8a99;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-right: 4px;
     }
     .filter-banner {
         background: linear-gradient(90deg, #e8f0fa, #f5f8ff);
@@ -210,7 +229,12 @@ st.markdown("""
         font-weight: 700;
         color: #d4af37;
     }
-    .stat-label  { font-size: 0.72rem; color: rgba(255,255,255,0.7); margin-top: 2px; font-weight: 300; }
+    .stat-label  {
+        font-size: 0.72rem;
+        color: rgba(255,255,255,0.7);
+        margin-top: 2px;
+        font-weight: 300;
+    }
     .edu-footer  {
         text-align: center;
         padding: 1.5rem 0 0.5rem;
@@ -256,11 +280,28 @@ st.markdown("""
 # ── Load Resources Once ────────────────────────────
 @st.cache_resource(show_spinner=False)
 def get_resources():
+    load_dotenv(override=True)
     ensure_data_files()
     df         = load_geo_data()
     collection = load_vector_db()
     return df, collection
 
+
+
+
+# ── Program icons map ──────────────────────────────
+PROGRAM_ICONS = {
+    "Engineering":      "⚙️",
+    "Computer Science": "💻",
+    "Business":         "📊",
+    "Medicine":         "🏥",
+    "Law":              "⚖️",
+    "Education":        "📚",
+    "Arts & Design":    "🎨",
+    "Science":          "🔬",
+    "Social Sciences":  "🌍",
+    "Agriculture":      "🌾",
+}
 
 # ── Rating Badge ───────────────────────────────────
 def rating_badge(rating):
@@ -386,11 +427,26 @@ def render_api_school_card(school):
     )
     rating      = float(school.get("rating", 0.0))
     rating_html = rating_badge(rating) + "&nbsp;" if rating > 0 else ""
-    district     = str(school.get("district", "") or "").strip()
+    district    = str(school.get("district", "") or "").strip()
     district_html = (
         f'<span class="chip">🏛️ {district[:40]}</span>'
         if district and district not in ["nan", "None", ""] else ""
     )
+
+    # ── Programs offered ───────────────────────────
+    programs     = school.get("programs", []) or []
+    program_html = ""
+    if programs:
+        chips = "".join([
+            f'<span class="program-chip">{PROGRAM_ICONS.get(p, "📖")} {p}</span>'
+            for p in programs[:7]
+        ])
+        program_html = (
+            '<div style="margin-top:0.6rem;">'
+            '<span class="programs-label">Programs:</span>'
+            + chips +
+            '</div>'
+        )
 
     card = (
         '<div class="school-card">'
@@ -399,11 +455,14 @@ def render_api_school_card(school):
             + ' &nbsp;|&nbsp; 🏷️ '
             + school_type + ' ' + school_level + '</div>'
         '<div class="school-desc">' + clean_desc + '</div>'
+        + program_html
+        + '<div style="margin-top:0.8rem;">'
         + rating_html
         + '<span class="chip">💰 ' + tuition + '</span>'
         + fee_chip
         + '<span class="chip">👥 ' + students_text + '</span>'
         + district_html
+        + '</div>'
         + '<div style="margin-top:0.9rem;padding-top:0.8rem;'
             'border-top:1px solid #f0f4f8;font-size:0.78rem;color:#9aabb8;">'
             '🗓️ Deadline: '
@@ -421,7 +480,7 @@ def main():
     <div class="main-header">
         <h1>🎓 EduNavigator AI</h1>
         <div class="gold-line"></div>
-        <p>Intelligent School & University Discovery</p>
+        <p>Intelligent School & University Discovery — All 50 States</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -459,22 +518,23 @@ def main():
             label_visibility="collapsed"
         )
 
-        # Step 3 & 4: County/District + City (K-12 only)
+        # ── Step 3 & 4: Filters ────────────────────
         selected_county = None
         selected_city   = None
-        county_active   = (
-            selected_level != "Select Level" and
-            is_county_applicable(selected_level)
-        )
 
-        if county_active:
+        UNI_LEVELS = ["University", "Community College", "Medical School"]
+        K12_LEVELS = ["Preschool", "Elementary", "Middle School", "High School"]
+
+        if selected_level in K12_LEVELS:
+            # ── K-12: District + City ──────────────
             st.markdown(
                 '<div class="sidebar-step">Step 3 — County / District</div>',
                 unsafe_allow_html=True
             )
             counties = get_counties_for_level(
                 df, selected_state, selected_level
-            )
+            ) or []
+
             if counties:
                 selected_county = st.selectbox(
                     "County / District",
@@ -488,19 +548,16 @@ def main():
                     else "Select a state first"
                 )
 
-            # Step 4: City
             st.markdown(
                 '<div class="sidebar-step">Step 4 — City (Optional)</div>',
                 unsafe_allow_html=True
             )
-            cities = (
-                get_cities_for_county(
-                    selected_state,
-                    selected_level,
-                    selected_county
-                )
-                if selected_state != "Select State" else []
-            )
+            cities = get_cities_for_county(
+                selected_state,
+                selected_level,
+                selected_county
+            ) if selected_state != "Select State" else []
+
             if cities:
                 selected_city = st.selectbox(
                     "City",
@@ -508,19 +565,41 @@ def main():
                     label_visibility="collapsed"
                 )
             else:
+                st.caption("Select a district to filter by city")
+
+        elif selected_level in UNI_LEVELS:
+            # ── University: City only ──────────────
+            st.markdown(
+                '<div class="sidebar-step">Step 3 — City (Optional)</div>',
+                unsafe_allow_html=True
+            )
+            if selected_state != "Select State":
+                with st.spinner("Loading cities..."):
+                    uni_cities = get_cities_for_university(
+                        selected_state, selected_level
+                    ) or []
+            else:
+                uni_cities = []
+
+            if uni_cities:
+                selected_city = st.selectbox(
+                    "City",
+                    options=["All Cities"] + uni_cities,
+                    label_visibility="collapsed"
+                )
+            else:
                 st.caption(
-                    "Select a district to filter by city"
+                    f"All cities in {selected_state}"
+                    if selected_state != "Select State"
+                    else "Select a state first"
                 )
 
-        else:
-            if selected_level not in ["Select Level"]:
-                st.markdown(
-                    '<div class="sidebar-step">Step 3 — County / District</div>',
-                    unsafe_allow_html=True
-                )
-                st.caption(
-                    f"Not applicable for {selected_level}."
-                )
+        elif selected_level != "Select Level":
+            st.markdown(
+                '<div class="sidebar-step">Step 3 — County / District</div>',
+                unsafe_allow_html=True
+            )
+            st.caption("Select a level first")
 
         st.divider()
 
@@ -707,7 +786,6 @@ def main():
             unsafe_allow_html=True
         )
 
-        # Build city context for query
         city_context = (
             f" in {selected_city}"
             if selected_city and

@@ -73,12 +73,24 @@ def orchestrator(
     # ── For K-12 always use NCES database ─────────
     # Never use cache for K-12 — cache has no district
     # filtering capability, always fetch fresh from NCES
+    # ── For K-12 always use NCES database ─────────
+    # Never use cache for K-12 — cache has no district
+    # filtering capability, always fetch fresh from NCES
     if level in K12_LEVELS:
         local_data_exists = False
         cache_hit         = False
         print(f"   ℹ️ K-12 — fetching from NCES database.")
+
+    # ── For University always use College Scorecard ─
+    # Never use local schools.csv (only 50 schools)
+    # Always fetch live from College Scorecard API
+    elif level in UNI_LEVELS:
+        local_data_exists = False
+        cache_hit         = False
+        print(f"   ℹ️ University — fetching from College Scorecard API.")
+
     else:
-        # ── Check ChromaDB cache (universities only) ─
+        # ── Check ChromaDB cache (fallback only) ────
         cache_hit = False
         if not local_data_exists and state and level:
             cache_hit = is_cached(collection, state, level)
@@ -116,7 +128,21 @@ def orchestrator(
         if level in UNI_LEVELS:
             print(f"\n📋 Step 2: College Scorecard API...")
             api_schools = fetch_universities(
-                state=state, level=level, per_page=20
+                state       = state,
+                level       = level,
+                per_page    = 100,
+                city_filter = city if city not in [
+                    None, "All Cities", ""
+                ] else None
+            )
+            # Sort: Public first, then Private, then others
+            type_order  = {"Public": 0, "Private": 1}
+            api_schools = sorted(
+                api_schools,
+                key = lambda s: (
+                    type_order.get(s.get("type", "Private"), 2),
+                    s.get("name", "")
+                )
             )
             response["agents_called"].append("CollegeScorecard")
 

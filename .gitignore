@@ -7,8 +7,6 @@ __pycache__/
 
 # Large data files
 data/nces_schools.csv
-data/k12_schools.csv
-data/k12_schools_sample.csv
 data/zip_county.csv
 
 # ChromaDB

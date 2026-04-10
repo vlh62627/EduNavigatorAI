@@ -42,6 +42,10 @@ def is_county_applicable(level):
     return level in COUNTY_LEVEL_EDUCATION
 
 
+def is_city_applicable(level):
+    return True
+
+
 def has_local_data(df, state, level):
     filtered = df[
         (df["state"] == state) &
@@ -52,9 +56,9 @@ def has_local_data(df, state, level):
 
 def get_counties_for_level(df, state, level):
     """
-    Return districts/counties for filtering.
+    Return districts/counties for K-12 filtering.
     Uses district from k12_schools.csv (more meaningful),
-    falls back to county from schools.csv.
+    falls back to county, then schools.csv.
     """
     if not is_county_applicable(level):
         return []
@@ -157,6 +161,24 @@ def get_cities_for_county(state, level, district=None):
         )
         return cities
 
+    except Exception:
+        return []
+
+
+def get_cities_for_university(state, level):
+    """
+    Return sorted cities for university levels
+    by fetching from College Scorecard API.
+    """
+    from utils.college_scorecard_api import fetch_universities
+    try:
+        schools = fetch_universities(state, level, per_page=100)
+        cities  = sorted(set(
+            s["city"].strip().title()
+            for s in schools
+            if s.get("city", "").strip()
+        ))
+        return cities
     except Exception:
         return []
 
