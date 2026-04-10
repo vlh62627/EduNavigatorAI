@@ -480,7 +480,7 @@ def main():
     <div class="main-header">
         <h1>🎓 EduNavigator AI</h1>
         <div class="gold-line"></div>
-        <p>Intelligent School & University Discovery — All 50 States</p>
+        <p>Intelligent School & University Discovery</p>
     </div>
     """, unsafe_allow_html=True)
 
