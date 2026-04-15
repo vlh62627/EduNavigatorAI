@@ -823,7 +823,7 @@ def main():
                     selected_city != "All Cities"
                     else None
                 ),
-                n_results    = 20,
+                n_results    = 100,
                 generate_pdf = generate_pdf and bool(pdf_school),
                 school_name  = pdf_school,
                 df           = df

@@ -132,7 +132,7 @@ def get_counties_for_level(df, state, level):
 def get_cities_for_county(state, level, district=None):
     """
     Return sorted cities for given state/level/district.
-    Matches against district OR county column.
+    Uses exact district match to avoid ALLEN matching MCALLEN.
     Elementary includes Preschool-classified schools.
     """
     k12_path = "data/k12_schools.csv"
@@ -164,13 +164,12 @@ def get_cities_for_county(state, level, district=None):
             "All Districts", "All Counties",
             "Select District", ""
         ]:
+            # Exact match — prevents ALLEN matching MCALLEN/CALALLEN
             dist_mask = (
-                k12_df["district"].str.contains(
-                    district, case=False, na=False
-                ) |
-                k12_df["county"].str.contains(
-                    district, case=False, na=False
-                )
+                (k12_df["district"].str.strip().str.upper() ==
+                 district.strip().upper()) |
+                (k12_df["county"].str.strip().str.upper() ==
+                 district.strip().upper())
             )
             mask = mask & dist_mask
 
@@ -221,16 +220,16 @@ def filter_schools(
             "Select County", "All Counties",
             "All Districts", "Select District", ""
         ]:
+            # Exact match to avoid partial matches
             filtered = filtered[
-                filtered["county"].str.contains(
-                    county, case=False, na=False
-                )
+                filtered["county"].str.strip().str.upper() ==
+                county.strip().upper()
             ]
         if city and city not in ["All Cities", ""]:
+            # Exact match to avoid Allen matching McAllen
             filtered = filtered[
-                filtered["city"].str.contains(
-                    city, case=False, na=False
-                )
+                filtered["city"].str.strip().str.upper() ==
+                city.strip().upper()
             ]
 
     return filtered.reset_index(drop=True)

@@ -82,22 +82,23 @@ def _get_from_local_db(
         "All Counties", "All Districts",
         "Select County", "Select District", "", "None"
     ]:
+        # Exact match to avoid ALLEN ISD matching MCALLEN ISD
         dist_mask = (
-            filtered["district"].str.contains(
-                county, case=False, na=False
-            ) |
-            filtered["county"].str.contains(
-                county, case=False, na=False
-            )
+            (filtered["district"].str.strip().str.upper() ==
+             county.strip().upper()) |
+            (filtered["county"].str.strip().str.upper() ==
+             county.strip().upper())
         )
         dist_filtered = filtered[dist_mask]
         if not dist_filtered.empty:
             filtered = dist_filtered
 
-    # City filter
+    # City filter — exact match to avoid
+    # Allen matching McAllen, Troy matching Troy etc.
     if city and city not in ["All Cities", "Select City", ""]:
-        city_mask     = filtered["city"].str.contains(
-            city, case=False, na=False
+        city_mask     = (
+            filtered["city"].str.strip().str.upper() ==
+            city.strip().upper()
         )
         city_filtered = filtered[city_mask]
         if not city_filtered.empty:
