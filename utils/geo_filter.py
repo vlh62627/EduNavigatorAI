@@ -54,6 +54,20 @@ def has_local_data(df, state, level):
     return len(filtered) > 0
 
 
+def _get_search_levels(level):
+    """
+    Return levels to search in k12 database.
+    Elementary includes Preschool because many
+    elementary schools offering Pre-K are classified
+    as Prekindergarten in NCES CCD data.
+    Example: MINETT EL (Frisco ISD) is classified
+    as Preschool in NCES but is an elementary school.
+    """
+    if level == "Elementary":
+        return ["Elementary", "Preschool"]
+    return [level]
+
+
 def get_counties_for_level(df, state, level):
     """
     Return districts/counties for K-12 filtering.
@@ -78,9 +92,12 @@ def get_counties_for_level(df, state, level):
                     k12_df[col].fillna("").astype(str)
                     .replace({"nan": "", "None": ""})
                 )
+
+            # Use expanded level search for Elementary
+            search_levels = _get_search_levels(level)
             filtered = k12_df[
                 (k12_df["state"] == state) &
-                (k12_df["level"] == level)
+                (k12_df["level"].isin(search_levels))
             ]
 
             # Try district first — more meaningful than county
@@ -116,6 +133,7 @@ def get_cities_for_county(state, level, district=None):
     """
     Return sorted cities for given state/level/district.
     Matches against district OR county column.
+    Elementary includes Preschool-classified schools.
     """
     k12_path = "data/k12_schools.csv"
     if not os.path.exists(k12_path):
@@ -133,9 +151,12 @@ def get_cities_for_county(state, level, district=None):
                 .replace({"nan": "", "None": ""})
             )
 
+        # Use expanded level search for Elementary
+        search_levels = _get_search_levels(level)
+
         mask = (
             (k12_df["state"] == state) &
-            (k12_df["level"] == level) &
+            (k12_df["level"].isin(search_levels)) &
             (k12_df["city"]  != "")
         )
 

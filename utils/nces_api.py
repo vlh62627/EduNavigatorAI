@@ -60,9 +60,17 @@ def _get_from_local_db(
             )
 
     # Filter by state and level
+    # Elementary includes Preschool-classified schools
+    # because many elementary schools offering Pre-K
+    # are classified as Prekindergarten in NCES CCD.
+    # Example: MINETT EL (Frisco ISD) is Preschool in NCES.
+    search_levels = [level]
+    if level == "Elementary":
+        search_levels = ["Elementary", "Preschool"]
+
     filtered = df[
         (df["state"] == state) &
-        (df["level"] == level)
+        (df["level"].isin(search_levels))
     ].copy()
 
     if filtered.empty:
@@ -96,8 +104,10 @@ def _get_from_local_db(
             filtered = city_filtered
 
     # Sort: Public first, then Charter, then Private, then by name
-    type_order = {"Public": 0, "Charter": 1, "Magnet": 2,
-                  "Vocational": 3, "Private": 4, "Special Ed": 5}
+    type_order = {
+        "Public": 0, "Charter": 1, "Magnet": 2,
+        "Vocational": 3, "Private": 4, "Special Ed": 5
+    }
     filtered["_type_order"] = filtered["type"].map(
         lambda t: type_order.get(t, 9)
     )

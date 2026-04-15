@@ -1,0 +1,20 @@
+Python
+Core programming language used to build the entire backend — agents, data processing, API integrations, and PDF generation.
+Streamlit
+Built the entire web UI including sidebar filters, school cards, and PDF download — deployed live on Streamlit Community Cloud with zero frontend code.
+Groq LLaMA 3.3 70B
+Powers all 3 AI agents for school comparison, web research synthesis, and checklist generation — chosen for its free tier and fastest inference speed available.
+ChromaDB
+Vector database that stores school embeddings for semantic search and caches API results so repeat queries return instantly without hitting external APIs again.
+LangChain
+Used for agent orchestration framework and Groq LLM integration — provides the Chain-of-Thought prompting structure across all 3 agents.
+Tavily
+Live web search API used by the Researcher Agent to find real-time school data when local database has no results for a state or level.
+NCES CCD
+US government database of 102,178 public K-12 schools — processed locally into 98,957 active schools with district, city, and county data across all 50 states.
+College Scorecard API
+US Department of Education API used to fetch universities, community colleges, and medical schools with tuition, enrollment, acceptance rates, and program data.
+FPDF2
+PDF generation library used by the Doc Specialist Agent to create color-coded, personalized application checklists with 5 sections and AI-generated pro tips.
+Pandas
+Used for processing the 25MB NCES CSV database, applying geographic filters, and managing all tabular school data across the application.
