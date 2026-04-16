@@ -15,7 +15,7 @@ K12_DB_PATH = "data/k12_schools.csv"
 
 
 def fetch_k12_schools(
-    state, level, county=None, city=None, limit=30
+    state, level, county=None, city=None, limit=100
 ):
     """
     Fetch K-12 schools.
@@ -40,8 +40,20 @@ def fetch_k12_schools(
     return _tavily_k12_search(state, level, county, limit)
 
 
+def _get_search_levels(level):
+    """
+    Expand level for NCES search.
+    Elementary includes Preschool because many elementary
+    schools offering Pre-K are classified as Preschool
+    in NCES CCD. Example: MINETT EL (Frisco ISD).
+    """
+    if level == "Elementary":
+        return ["Elementary", "Preschool"]
+    return [level]
+
+
 def _get_from_local_db(
-    state, level, county=None, city=None, limit=30
+    state, level, county=None, city=None, limit=100
 ):
     """Query local NCES CCD CSV database."""
     try:
@@ -59,30 +71,41 @@ def _get_from_local_db(
                 .replace({"nan": "", "None": ""})
             )
 
-    # Filter by state and level
-    # Elementary includes Preschool-classified schools
-    # because many elementary schools offering Pre-K
-    # are classified as Prekindergarten in NCES CCD.
-    # Example: MINETT EL (Frisco ISD) is Preschool in NCES.
-    search_levels = [level]
-    if level == "Elementary":
-        search_levels = ["Elementary", "Preschool"]
-
+    # ── Step 1: Base filter by state + level ──────
+    search_levels = _get_search_levels(level)
     filtered = df[
         (df["state"] == state) &
         (df["level"].isin(search_levels))
     ].copy()
 
+    # ── Step 2: Always add STEAM/STEM schools ─────
+    # STEAM schools in NCES are often classified as
+    # Preschool regardless of actual grade range.
+    # Always include them so they show under any level.
+    steam_df = df[
+        (df["state"] == state) &
+        (df["name"].str.contains(
+            "STEAM|STEM", case=False, na=False
+        ))
+    ].copy()
+
+    if not steam_df.empty:
+        filtered = pd.concat(
+            [filtered, steam_df]
+        ).drop_duplicates(
+            subset=["school_id"] if "school_id" in df.columns
+            else ["name"]
+        )
+
     if filtered.empty:
         return []
 
-    # District / County filter
-    # Matches against district first, then county
+    # ── Step 3: District filter — exact match ─────
+    # Exact match prevents ALLEN ISD matching MCALLEN ISD
     if county and county not in [
         "All Counties", "All Districts",
         "Select County", "Select District", "", "None"
     ]:
-        # Exact match to avoid ALLEN ISD matching MCALLEN ISD
         dist_mask = (
             (filtered["district"].str.strip().str.upper() ==
              county.strip().upper()) |
@@ -93,10 +116,10 @@ def _get_from_local_db(
         if not dist_filtered.empty:
             filtered = dist_filtered
 
-    # City filter — exact match to avoid
-    # Allen matching McAllen, Troy matching Troy etc.
+    # ── Step 4: City filter — exact match ─────────
+    # Exact match prevents Allen matching McAllen
     if city and city not in ["All Cities", "Select City", ""]:
-        city_mask     = (
+        city_mask = (
             filtered["city"].str.strip().str.upper() ==
             city.strip().upper()
         )
@@ -104,7 +127,7 @@ def _get_from_local_db(
         if not city_filtered.empty:
             filtered = city_filtered
 
-    # Sort: Public first, then Charter, then Private, then by name
+    # ── Step 5: Sort — Public first, then by name ─
     type_order = {
         "Public": 0, "Charter": 1, "Magnet": 2,
         "Vocational": 3, "Private": 4, "Special Ed": 5
@@ -112,10 +135,16 @@ def _get_from_local_db(
     filtered["_type_order"] = filtered["type"].map(
         lambda t: type_order.get(t, 9)
     )
+
+    # STEAM/STEM schools always float to top
+    filtered["_is_steam"] = filtered["name"].str.contains(
+        "STEAM|STEM", case=False, na=False
+    ).astype(int).map({1: 0, 0: 1})
+
     filtered = (
         filtered
-        .sort_values(["_type_order", "name"])
-        .drop(columns=["_type_order"])
+        .sort_values(["_is_steam", "_type_order", "name"])
+        .drop(columns=["_type_order", "_is_steam"])
         .head(limit)
         .reset_index(drop=True)
     )
@@ -138,9 +167,13 @@ def _get_from_local_db(
         if website and not website.startswith("http"):
             website = "https://" + website
 
+        # Use requested level for display — not NCES level
+        # (STEAM schools may be classified differently)
+        display_level = level
+
         description = _build_description(
             stype    = clean(row.get("type", "Public")),
-            level    = level,
+            level    = display_level,
             city     = city_val,
             state    = state,
             county   = county_val,
@@ -151,7 +184,7 @@ def _get_from_local_db(
             "school_id":            clean(row.get("school_id", "")),
             "name":                  name,
             "type":                  clean(row.get("type", "Public")),
-            "level":                 level,
+            "level":                 display_level,
             "state":                 state,
             "county":                county_val,
             "city":                  city_val.title(),

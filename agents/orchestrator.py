@@ -16,8 +16,8 @@ from utils.embeddings            import cache_api_schools, is_cached
 load_dotenv()
 
 MIN_LOCAL_RESULTS = 2
-K12_LEVELS  = ["Preschool", "Elementary", "Middle School", "High School"]
-UNI_LEVELS  = ["University", "Community College", "Medical School"]
+K12_LEVELS = ["Preschool", "Elementary", "Middle School", "High School"]
+UNI_LEVELS = ["University", "Community College", "Medical School"]
 
 
 def orchestrator(
@@ -27,7 +27,7 @@ def orchestrator(
     level        = None,
     county       = None,
     city         = None,
-    n_results    = 20,
+    n_results    = 100,
     generate_pdf = False,
     school_name  = None,
     df           = None
@@ -73,17 +73,12 @@ def orchestrator(
     # ── For K-12 always use NCES database ─────────
     # Never use cache for K-12 — cache has no district
     # filtering capability, always fetch fresh from NCES
-    # ── For K-12 always use NCES database ─────────
-    # Never use cache for K-12 — cache has no district
-    # filtering capability, always fetch fresh from NCES
     if level in K12_LEVELS:
         local_data_exists = False
         cache_hit         = False
         print(f"   ℹ️ K-12 — fetching from NCES database.")
 
     # ── For University always use College Scorecard ─
-    # Never use local schools.csv (only 50 schools)
-    # Always fetch live from College Scorecard API
     elif level in UNI_LEVELS:
         local_data_exists = False
         cache_hit         = False
@@ -108,7 +103,7 @@ def orchestrator(
             collection = collection,
             query      = query,
             filters    = filters,
-            n_results  = 20
+            n_results  = n_results
         )
         response["agents_called"].append("Librarian")
         response["schools"]       = librarian_result["schools"]
@@ -125,6 +120,7 @@ def orchestrator(
     api_schools = []
 
     if not local_data_exists and not cache_hit and state and level:
+
         if level in UNI_LEVELS:
             print(f"\n📋 Step 2: College Scorecard API...")
             api_schools = fetch_universities(
@@ -135,7 +131,7 @@ def orchestrator(
                     None, "All Cities", ""
                 ] else None
             )
-            # Sort: Public first, then Private, then others
+            # Sort: Public first, then Private
             type_order  = {"Public": 0, "Private": 1}
             api_schools = sorted(
                 api_schools,
@@ -148,7 +144,6 @@ def orchestrator(
 
         elif level in K12_LEVELS:
             print(f"\n📋 Step 2: NCES K-12 Search...")
-            print(f"   DEBUG county='{county}' city='{city}'")
             api_schools = fetch_k12_schools(
                 state  = state,
                 level  = level,
@@ -158,10 +153,63 @@ def orchestrator(
             )
             response["agents_called"].append("NCES_API")
 
+            # ── STEAM cross-level search ───────────
+            # If query mentions STEAM/STEM, also search
+            # other K-12 levels to find STEAM schools
+            # classified differently in NCES
+            is_steam_query = any(
+                kw in query.upper()
+                for kw in ["STEAM", "STEM"]
+            )
+            if is_steam_query:
+                print(
+                    f"   🔬 STEAM/STEM query — expanding "
+                    f"cross-level search..."
+                )
+                other_levels = [
+                    l for l in K12_LEVELS if l != level
+                ]
+                existing_ids = {
+                    s.get("school_id", s.get("name", ""))
+                    for s in api_schools
+                }
+                for steam_level in other_levels:
+                    extra = fetch_k12_schools(
+                        state  = state,
+                        level  = steam_level,
+                        county = county,
+                        city   = city,
+                        limit  = 50
+                    )
+                    # Only add STEAM/STEM schools
+                    for s in extra:
+                        sid  = s.get(
+                            "school_id", s.get("name", "")
+                        )
+                        name = s.get("name", "")
+                        if (
+                            sid not in existing_ids and
+                            (
+                                "STEAM" in name.upper() or
+                                "STEM"  in name.upper()
+                            )
+                        ):
+                            # Set display level to
+                            # match user's selection
+                            s["level"] = level
+                            api_schools.append(s)
+                            existing_ids.add(sid)
+                print(
+                    f"   🔬 Total after STEAM expansion: "
+                    f"{len(api_schools)} schools"
+                )
+
         # Cache results in ChromaDB
         if api_schools:
             print(f"   💾 Caching {len(api_schools)} schools...")
-            cache_api_schools(collection, api_schools, source="api")
+            cache_api_schools(
+                collection, api_schools, source="api"
+            )
             response["source"]      = "api"
             response["api_schools"] = api_schools
         else:
@@ -187,16 +235,13 @@ def orchestrator(
     needs_web = (
         (not local_data_exists and
          not cache_hit and
-         not api_schools)     or
+         not api_schools) or
         is_specific_school
-        # Removed is_auto_query — NCES results
-        # are sufficient for K-12 auto queries
     )
 
     if needs_web:
         reason = (
-            "specific school"  if is_specific_school else
-            "auto query"       if is_auto_query else
+            "specific school" if is_specific_school else
             "no API results"
         )
         print(f"\n📋 Step 3: Researcher Agent ({reason})...")

@@ -611,9 +611,9 @@ def main():
         search_query = st.text_area(
             "Query",
             placeholder=(
+                "e.g. STEAM Center\n"
                 "e.g. best STEM programs\n"
-                "e.g. schools with scholarships\n"
-                "e.g. small class sizes"
+                "e.g. gifted and talented programs"
             ),
             height=100,
             label_visibility="collapsed",
